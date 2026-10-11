@@ -4,6 +4,7 @@ const status = document.getElementById('status');
 const example = document.getElementById('example');
 const run = document.getElementById('run');
 const stop = document.getElementById('stop');
+const format = document.getElementById('format');
 
 const examples = {
 	hello: source.value,
@@ -37,6 +38,7 @@ function finish(message) {
 	}
 	run.disabled = false;
 	stop.disabled = true;
+	format.disabled = false;
 	example.disabled = false;
 	status.textContent = message;
 }
@@ -56,6 +58,7 @@ function runSource() {
 	output.textContent = '';
 	run.disabled = true;
 	stop.disabled = false;
+	format.disabled = true;
 	example.disabled = true;
 	status.textContent = 'Loading the V compiler…';
 	try {
@@ -73,6 +76,10 @@ function runSource() {
 					break;
 				case 'done':
 					finish('Finished.');
+					break;
+				case 'formatted':
+					source.value = data.body;
+					finish('Formatted.');
 					break;
 				case 'error':
 					fail(data.message);
@@ -96,7 +103,56 @@ function runSource() {
 example.addEventListener('change', () => {
 	source.value = examples[example.value];
 });
+
+function formatSource() {
+	if (worker) return;
+	if (!source.value.trim()) {
+		status.textContent = 'Write a V program before formatting.';
+		source.focus();
+		return;
+	}
+	run.disabled = true;
+	stop.disabled = false;
+	format.disabled = true;
+	example.disabled = true;
+	status.textContent = 'Loading the V formatter…';
+	try {
+		const current = new Worker(new URL('./worker.js', import.meta.url), { type: 'module' });
+		worker = current;
+		current.onmessage = ({ data }) => {
+			if (worker !== current) return;
+			switch (data.type) {
+				case 'status':
+					status.textContent = data.message;
+					break;
+				case 'output':
+					output.textContent += data.text;
+					output.scrollTop = output.scrollHeight;
+					break;
+				case 'formatted':
+					source.value = data.body;
+					finish('Formatted.');
+					break;
+				case 'error':
+					fail(data.message);
+					break;
+			}
+		};
+		current.onerror = (event) => {
+			if (worker !== current) return;
+			event.preventDefault();
+			fail(event.message || 'Could not load the playground worker. Serve this directory over HTTP and try again.');
+		};
+		current.onmessageerror = () => {
+			if (worker === current) fail('Could not read a response from the playground worker.');
+		};
+		current.postMessage({ type: 'format', source: source.value });
+	} catch (error) {
+		fail(`Could not start the playground: ${error.message}. Serve this directory over HTTP and try again.`);
+	}
+}
 run.addEventListener('click', runSource);
+format.addEventListener('click', formatSource);
 stop.addEventListener('click', () => finish('Stopped.'));
 source.addEventListener('keydown', (event) => {
 	if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
